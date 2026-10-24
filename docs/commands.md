@@ -36,6 +36,7 @@ soup infer|chat|diff ... --device cpu|cuda|cuda:N|mps  Pick where the model load
 soup push --model ./output --repo user/name   Upload to HuggingFace
 soup push --model ./output --repo user/name --collection user/coll-abc123  Add to HF Collection
 soup merge --adapter ./output                 Merge LoRA with base model
+soup merge --adapter ./output --low-memory    Merge tensor by tensor without loading the whole model into RAM
 soup merge --adapter ./output --save-format 4bit --no-double-quant  Save a BNB-4bit merge with double-quantization disabled (default on; #321)
 soup merge-sharded-fsdp-weights ./shards -o merged.safetensors  Consolidate FSDP shards into one safetensors (v0.71.14; --plan-only previews)
 soup delinearize-llama4 ./src --target ./out [--num-experts N] [--plan-only]  Live Llama-4 fused-expert reshape [E*din,dout] -> [E,din,dout] + sidecar copy (v0.71.21)
@@ -144,7 +145,7 @@ soup data push --input d.jsonl --hf-dataset u/n --hub modelscope|modelers  Uploa
 soup data registry                           List all registered datasets
 soup data demo                                List bundled demo JSONL fixtures
 soup data demo alpaca_demo --output ./d.jsonl  Copy a bundled demo JSONL fixture
-soup data ingest <file>                         PDF/DOCX/MD/TXT -> JSONL (one row per page/heading)
+soup data ingest <file>                         PDF/DOCX/MD/TXT -> JSONL (PDF/DOCX: pip install "soup-cli[documents]")
 soup data preprocess <config>                   AOT-tokenize and cache for reuse across runs
 soup data recipe <path>                         Validate / execute a Data Recipe DAG
 soup data mix                                 BETA mixture-weight optimiser (proxy runs)
@@ -183,7 +184,7 @@ soup migrate --from llamafactory config.yaml  Import config from LLaMA-Factory
 soup migrate --from axolotl config.yml        Import config from Axolotl
 soup migrate --from unsloth notebook.ipynb    Import config from Unsloth notebook
 soup migrate --from llamafactory c.yaml --dry-run  Preview without writing
-soup recipes list                             List all 170 ready-made recipes
+soup recipes list                             List all 171 ready-made recipes
 soup recipes show llama3.1-8b-sft            Print recipe YAML
 soup recipes use llama3.1-8b-sft             Copy recipe to soup.yaml
 soup recipes search "reasoning"              Search by keyword/task/size

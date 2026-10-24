@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests._windows_ci import skip_on_windows_ci
+
 CUDA = pytest.mark.gpu(reason="NF4 dequantisation needs bitsandbytes on CUDA")
 #: ``StreamedExperts.two_reads``: off is the default node layout; on puts the routing
 #: multiply inside the expert's autograd node so a checkpoint recompute reads nothing.
@@ -131,8 +133,19 @@ def test_streamed_experts_backward_equals_eager_bit_exactly(tmp_path, build, two
     reader.close()
 
 
+# The bf16 case runs a CPU bf16 matmul under autocast, and part of GitHub's windows-latest
+# fleet dies on it with 0xc000001d (illegal instruction) in the eager reference module's
+# forward; the crash kills the xdist worker and the cell later times out (#382, #1314).
+# Only that case is skipped, and only on a Windows CI runner: the fp32 control, a developer's
+# Windows box, ubuntu and macos all still run it.
 @TWO_READS
-@pytest.mark.parametrize("autocast", [False, True], ids=["fp32-control", "cpu-bf16-autocast"])
+@pytest.mark.parametrize(
+    "autocast",
+    [
+        pytest.param(False, id="fp32-control"),
+        pytest.param(True, id="cpu-bf16-autocast", marks=skip_on_windows_ci),
+    ],
+)
 def test_streamed_experts_backward_preserves_forward_autocast(tmp_path, autocast, two_reads):
     """Recomputation must differentiate the forward precision after its AMP region exits."""
     import torch
