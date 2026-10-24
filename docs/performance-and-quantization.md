@@ -576,10 +576,10 @@ recomputing the differentiable scores, preserving the routing-weight contributio
 the input gradient. No expert weights are retained between visits.
 
 This requires the `per_expert` layout and still refuses routed-expert adapters. There is
-no training-config switch or default change. Through `build_streamed_model` it reaches
-only DeepSeek-V3-family bases, because `per_expert` admits only `deepseek_v3`. A direct
-`install_expert_streaming(..., two_reads=True)` call also accepts OLMoE decoder layers
-(`OlmoeDecoderLayer`); any other decoder class is refused. A layer that
+no training-config switch or default change. It reaches only DeepSeek-V3-family bases:
+`per_expert` admits only `deepseek_v3`, and a direct
+`install_expert_streaming(..., two_reads=True)` call refuses every decoder class other
+than `DeepseekV3DecoderLayer`. A layer that
 `stream_recompute` switches off runs without the checkpoint and so without the replay:
 it reads each expert in the forward and the backward, as the default path does there.
 

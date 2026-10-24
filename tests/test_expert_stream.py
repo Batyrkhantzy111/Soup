@@ -360,25 +360,29 @@ def test_two_read_install_refuses_a_moe_block_without_its_router(tmp_path):
 def test_two_read_install_refuses_a_decoder_that_saves_the_moe_output(tmp_path):
     """The recompute's MoE output is zero. FlexOlmo normalises it before the residual add,
     and that RMSNorm saves its input: a zero there would give wrong gradients silently.
-    Only decoder graphs checked to consume the MoE output with views and additions are
-    admitted; the default three-read install still accepts the layer."""
-    from transformers import FlexOlmoConfig
+    OLMoE is refused as well: no test compares the real layer's gradients with the resident
+    model's. Only decoder graphs checked to consume the MoE output with views and additions
+    are admitted; the default three-read install still accepts both layers."""
+    from transformers import FlexOlmoConfig, OlmoeConfig
     from transformers.models.flex_olmo.modeling_flex_olmo import FlexOlmoDecoderLayer
+    from transformers.models.olmoe.modeling_olmoe import OlmoeDecoderLayer
 
     from soup_cli.utils.expert_stream import ExpertFetcher, install_expert_streaming
 
     module, n_experts, _ = _olmoe_experts(5)
     _, reader = _streamed_copy(tmp_path, module, n_experts)
     fetcher = ExpertFetcher(device="cpu", dtype="float32")
-    config = FlexOlmoConfig(
+    shape = dict(
         hidden_size=32, intermediate_size=16, num_experts=8, num_experts_per_tok=2,
         num_attention_heads=4, num_key_value_heads=4,
     )
-    with pytest.raises(ValueError, match="FlexOlmoDecoderLayer"):
-        install_expert_streaming(
-            [FlexOlmoDecoderLayer(config, 0)], {0: reader}, fetcher, two_reads=True
-        )
-    assert install_expert_streaming([FlexOlmoDecoderLayer(config, 0)], {0: reader}, fetcher) == 1
+    for layer_cls, config in (
+        (FlexOlmoDecoderLayer, FlexOlmoConfig(**shape)),
+        (OlmoeDecoderLayer, OlmoeConfig(**shape)),
+    ):
+        with pytest.raises(ValueError, match=f"is a {layer_cls.__name__}:"):
+            install_expert_streaming([layer_cls(config, 0)], {0: reader}, fetcher, two_reads=True)
+        assert install_expert_streaming([layer_cls(config, 0)], {0: reader}, fetcher) == 1
     reader.close()
 
 
@@ -1122,7 +1126,7 @@ def _holder(experts, gate=None):
     decoder-graph admission that ``test_two_read_install_refuses_a_decoder...`` covers."""
     import torch.nn as nn
 
-    class OlmoeDecoderLayer(nn.Module):
+    class DeepseekV3DecoderLayer(nn.Module):
         def __init__(self):
             super().__init__()
             self.mlp = nn.Module()
@@ -1130,7 +1134,7 @@ def _holder(experts, gate=None):
             if gate is not None:
                 self.mlp.gate = gate
 
-    return OlmoeDecoderLayer()
+    return DeepseekV3DecoderLayer()
 
 
 # --------------------------------------------------------------------------

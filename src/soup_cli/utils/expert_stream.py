@@ -824,9 +824,10 @@ def find_experts_module(layer: Any) -> Optional[Tuple[Any, str, Any]]:
 
 
 #: Decoder layers whose MoE output reaches only views and additions before the residual,
-#: none of which saves it for its values (transformers 5.19, read per class). A two-read
-#: recompute returns zeros there; any op that saved them would corrupt the gradients.
-TWO_READ_DECODERS = frozenset({"DeepseekV3DecoderLayer", "OlmoeDecoderLayer"})
+#: none of which saves it for its values (transformers 5.19, read per class), and whose real
+#: layer has a gradient comparison with the resident model. A two-read recompute returns
+#: zeros there; any op that saved them would corrupt the gradients.
+TWO_READ_DECODERS = frozenset({"DeepseekV3DecoderLayer"})
 
 
 def install_expert_streaming(
