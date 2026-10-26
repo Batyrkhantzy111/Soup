@@ -1077,6 +1077,41 @@ def test_two_read_replay_refuses_a_router_call_the_forward_did_not_make(tmp_path
     reader.close()
 
 
+def test_two_read_replay_hands_out_owned_copies_of_the_recorded_decisions(tmp_path):
+    """A caller may edit a router's outputs in place (OLMoE-style routers divide the
+    top-k values in place). That must change neither what the record holds nor what
+    any later recompute receives."""
+    import torch
+    from transformers import OlmoeConfig
+    from transformers.models.olmoe.modeling_olmoe import OlmoeTopKRouter
+
+    from soup_cli.utils.expert_stream import (
+        ExpertFetcher,
+        install_expert_streaming,
+        two_read_checkpoint_contexts,
+    )
+
+    module, n_experts, _ = _olmoe_experts(5)
+    _, reader = _streamed_copy(tmp_path, module, n_experts)
+    router = OlmoeTopKRouter(OlmoeConfig(hidden_size=32, num_experts=8, num_experts_per_tok=2))
+    holder = _holder(module, gate=router)
+    install_expert_streaming(
+        [holder], {0: reader}, ExpertFetcher(device="cpu", dtype="float32"), two_reads=True
+    )
+    forward, replay = two_read_checkpoint_contexts()
+    hidden = torch.randn(6, 32)
+    with forward:
+        decided = holder.mlp.gate(hidden)
+    want = decided[2].clone()
+    decided[2].zero_()  # the forward's caller edits its result in place
+    for _ in range(2):  # two recomputes, as under retain_graph
+        with replay:
+            replayed = holder.mlp.gate(hidden)
+            assert torch.equal(replayed[2], want)
+            replayed[2].zero_()  # an edit of a replayed result must not reach the next one
+    reader.close()
+
+
 def test_two_read_experts_are_refused_on_a_fused_cache(tmp_path):
     """Accepted and ignored would train with three reads while reporting two."""
     from soup_cli.utils.layer_stream_runtime import build_streamed_model
