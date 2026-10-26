@@ -618,7 +618,7 @@ def _build_topk_decisions_class():
             super().__init__()
             self.scope = scope
 
-        def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        def __torch_dispatch__(self, func, _types, args=(), kwargs=None):
             kwargs = kwargs or {}
             if func is not topk:
                 return func(*args, **kwargs)

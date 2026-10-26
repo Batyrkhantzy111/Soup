@@ -609,7 +609,7 @@ On CPU, against the resident eager model and the default path, losses, `dX`, the
 gradients and every LoRA gradient are bit-identical with exactly two reads per expert visit,
 including gradient accumulation, two forwards before one backward, `retain_graph`, a
 no-grad forward and an exception mid-step. Hardware measurements are not part of this
-change and are discussed with its design.
+change and are discussed with its design (#2170).
 
 **`stream_nf4_scale_cache` (opt-in).** On the dequantise + `F.linear` path, a
 double-quantised NF4 weight expands its 8-bit block scales to fp32 on every visit,
