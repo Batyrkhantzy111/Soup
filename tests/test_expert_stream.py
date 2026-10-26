@@ -133,6 +133,27 @@ def test_streamed_experts_backward_equals_eager_bit_exactly(tmp_path, build, two
     reader.close()
 
 
+@TWO_READS
+def test_streamed_experts_routing_weight_gradient_when_the_input_needs_none(tmp_path, two_reads):
+    """Nothing upstream trains, so the expert input needs no gradient, while the routing
+    weight does: its gradient must be the weight's own, not the input's."""
+    import torch
+
+    module, n_experts, top_k = _deepseek_v3_experts(5)
+    streamed, reader = _streamed_copy(tmp_path, module, n_experts, two_reads)
+    states, index, weights, grad_out = _routing(24, n_experts, top_k, 32, 9)
+    states.requires_grad_(False)
+
+    module(states, index, weights).backward(grad_out)
+    want = weights.grad.clone()
+    weights.grad = None
+    streamed(states, index, weights).backward(grad_out)
+
+    assert float(want.abs().sum()) > 0.0
+    assert torch.equal(weights.grad, want), (weights.grad - want).abs().max().item()
+    reader.close()
+
+
 # The bf16 case runs a CPU bf16 matmul under autocast, and part of GitHub's windows-latest
 # fleet dies on it with 0xc000001d (illegal instruction) in the eager reference module's
 # forward; the crash kills the xdist worker and the cell later times out (#382, #1314).
