@@ -13,6 +13,7 @@ and checks that no scope or record is left behind.
 from __future__ import annotations
 
 import gc
+import re
 
 import pytest
 
@@ -436,11 +437,12 @@ def _inner(net, idx):
     return net.get_submodule("base_model.model.model.layers")[idx].inner
 
 
-#: Modules whose forward output differs in a two-read recompute, as reached from the model.
+#: Modules whose forward output differs in a two-read recompute, as reached from the model,
+#: and the label the refusal names each one by.
 REFUSED_HOOK_SITES = {
-    "moe-block": lambda net: _inner(net, 1).mlp,
-    "routed-experts": lambda net: _inner(net, 2).mlp.experts,
-    "decoder-layer": lambda net: _inner(net, 1),
+    "moe-block": (lambda net: _inner(net, 1).mlp, "the MoE block"),
+    "routed-experts": (lambda net: _inner(net, 2).mlp.experts, "the routed experts"),
+    "decoder-layer": (lambda net: _inner(net, 1), "the decoder layer"),
 }
 
 
@@ -456,12 +458,13 @@ def test_a_forward_hook_registered_after_build_is_refused_before_any_gradient(
     _, want = _single_step(nets["resident"][0], ids)
     net.zero_grad(set_to_none=True)
     calls = []
-    handle = REFUSED_HOOK_SITES[site](net).register_forward_hook(
-        lambda _m, _a, output: calls.append(1)
-    )
+    module, label = REFUSED_HOOK_SITES[site]
+    handle = module(net).register_forward_hook(lambda _m, _a, output: calls.append(1))
     before = _reads(runtime)
+    # Every refusal also names all three modules in its explanation, so anchor on the label
+    # right after the layer index: the module the refusal is about.
     try:
-        with pytest.raises(RuntimeError, match="two-read expert streaming refuses decoder layer"):
+        with pytest.raises(RuntimeError, match=rf"refuses decoder layer \d+: {re.escape(label)}"):
             net(input_ids=ids, labels=ids)
     finally:
         handle.remove()
@@ -526,14 +529,16 @@ def test_a_global_forward_hook_is_refused(one_backward_per_forward):
 
 def test_hooks_outside_the_changed_outputs_keep_two_reads_exact(one_backward_per_forward):
     """Diagnostic hooks of the kind a gradient check uses stay allowed: a forward pre-hook on
-    the wrapper that registers a dX gradient hook, forward hooks on the routers and the
-    attention, and a forward pre-hook on the MoE block. Loss, every LoRA gradient and the
-    captured dX equal the resident model's; reads stay at two per forward visit."""
+    the wrapper that registers a dX gradient hook, a forward hook on the wrapper that keeps
+    the layer output, forward hooks on the routers, the attention and the post-attention
+    norm, and a forward pre-hook on the MoE block. Loss, every LoRA gradient, the captured
+    dX and the layer outputs equal the resident model's; reads stay at two per forward
+    visit."""
     nets, ids = one_backward_per_forward
 
     def run(net):
         net.zero_grad(set_to_none=True)
-        seen = {"dX": {}, "router": 0, "attn": 0, "pre": 0}
+        seen = {"dX": {}, "out": {}, "router": 0, "attn": 0, "norm": 0, "pre": 0}
         layers = net.get_submodule("base_model.model.model.layers")
         handles = []
         for idx, layer in enumerate(layers):
@@ -543,9 +548,16 @@ def test_hooks_outside_the_changed_outputs_keep_two_reads_exact(one_backward_per
                 if args[0].requires_grad:
                     args[0].register_hook(lambda g, idx=idx: seen["dX"].__setitem__(idx, g.clone()))
 
+            def on_output(_m, _args, output, idx=idx):
+                hidden = output[0] if isinstance(output, tuple) else output
+                seen["out"].setdefault(idx, []).append(hidden.detach().clone())
+
             handles.append(layer.register_forward_pre_hook(on_input))
+            handles.append(layer.register_forward_hook(on_output))
             handles.append(inner.self_attn.register_forward_hook(
                 lambda *_: seen.__setitem__("attn", seen["attn"] + 1)))
+            handles.append(inner.post_attention_layernorm.register_forward_hook(
+                lambda *_: seen.__setitem__("norm", seen["norm"] + 1)))
             if hasattr(inner.mlp, "gate"):
                 handles.append(inner.mlp.gate.register_forward_hook(
                     lambda *_: seen.__setitem__("router", seen["router"] + 1)))
@@ -571,9 +583,16 @@ def test_hooks_outside_the_changed_outputs_keep_two_reads_exact(one_backward_per
     assert set(got_seen["dX"]) == set(want_seen["dX"]) and got_seen["dX"]
     for idx, grad in want_seen["dX"].items():
         assert torch_equal(got_seen["dX"][idx], grad), idx
-    # Forward + recompute: each hook runs twice per layer on the streamed path.
+    # The wrapper's forward hook runs once per layer, outside the checkpoint, and sees the
+    # forward's output: the recompute never calls the wrapper.
+    assert set(got_seen["out"]) == set(want_seen["out"]) and got_seen["out"]
+    for idx, outputs in want_seen["out"].items():
+        assert len(got_seen["out"][idx]) == len(outputs) == 1, idx
+        assert torch_equal(got_seen["out"][idx][0], outputs[0]), idx
+    # Forward + recompute: each hook inside the layer runs twice per layer on the streamed
+    # path.
     assert (got_seen["router"], got_seen["pre"]) == (4, 4)
-    assert got_seen["attn"] == 6
+    assert got_seen["attn"] == got_seen["norm"] == 6
     after = _reads(runtime)
     assert [a - f for a, f in zip(after, [b + v for b, v in zip(before, visits)])] == [
         2 * v for v in visits
