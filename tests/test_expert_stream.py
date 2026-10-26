@@ -928,7 +928,14 @@ def _step_capturing(net, ids, autocast=False):
     return captured
 
 
-@pytest.mark.parametrize("cell", ["fp32", "bf16", "bf16-autocast"])
+@pytest.mark.parametrize(
+    "cell",
+    [
+        pytest.param("fp32", id="fp32"),
+        pytest.param("bf16", id="bf16", marks=skip_on_windows_ci),
+        pytest.param("bf16-autocast", id="bf16-autocast", marks=skip_on_windows_ci),
+    ],
+)
 def test_two_read_experts_equal_the_resident_model_and_the_default_path(tmp_path, cell):
     """Logits, loss, dX, the router-output gradients, the router weight's gradient and
     every LoRA gradient of the resident eager model, the default streamed path and two
