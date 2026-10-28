@@ -179,6 +179,22 @@ def test_zero_fetch_count_fails_even_when_3_to_2_holds(cmp, tmp_path):
         [(2, "expert_fetches")]
 
 
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf], ids=["nan", "+inf", "-inf"])
+@pytest.mark.parametrize("runs", [RUNS, ("B1",)], ids=["all-four", "one-run"])
+def test_a_non_finite_loss_refuses(cmp, tmp_path, runs, value):
+    """``float.hex`` turns NaN and each infinity into one string, so four equal non-finite
+    losses would compare equal and could pass. A non-finite loss is a broken input, not a
+    result: the comparison is refused, naming every run and step, with no timing."""
+    quad = _quad()
+    for name in runs:
+        _mutate_step(quad, name, 1, "loss", value)
+    code, report = _run(cmp, tmp_path, quad, limits=True)
+    _refused_with(code, report, "loss")
+    named = [r for r in report["refusals"] if "loss" in r]
+    assert named == [f"{name} step 1: loss {value!r} is not a finite number" for name in runs]
+    assert report["failures"] == []
+
+
 @pytest.mark.parametrize("dense_b2, verdict", [(77, "PASS"), (78, "FAIL")])
 def test_unusable_seconds_never_change_the_verdict(cmp, tmp_path, dense_b2, verdict):
     quad = _quad()

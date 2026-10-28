@@ -26,7 +26,9 @@ Verdicts and exit codes (``--out`` is written atomically in every case):
   above, run status, verdicts, phase, arms, every run in ``--deterministic strict``,
   identical configuration / environment / numerics settings / attention and experts
   implementation / initial trainable and input-id digests / leaf cgroup read-back /
-  series parent path, step counts, complete gradient digests). With
+  series parent path, step counts, complete gradient digests, a finite loss at every
+  step: ``float.hex`` gives one string for NaN and for each infinity, so equal non-finite
+  losses would otherwise compare equal). With
   ``--memory-max`` / ``--swap-max`` every record's leaf ``cgroup.readback`` and series
   parent ``series.readback`` must show those values; a record without ``series`` (a run
   with no limit on the series parent) refuses, since the leaf limit alone does not count
@@ -227,8 +229,9 @@ def _per_run_checks(run: Dict[str, Any], refusals: List[str]) -> None:
         digest = entry.get("lora_grads_sha256")
         if not isinstance(digest, str) or not _HEX64.fullmatch(digest):
             refusals.append(f"{where}: lora_grads_sha256 {digest!r} is not a 64-hex digest")
-        if not _is_number(entry.get("loss")):
-            refusals.append(f"{where}: loss {entry.get('loss')!r} is not a number")
+        loss = entry.get("loss")
+        if not _is_number(loss) or not math.isfinite(loss):
+            refusals.append(f"{where}: loss {loss!r} is not a finite number")
         for key in EXPERT_QUANTITIES + EQUAL_QUANTITIES:
             if not _is_int(_get(entry, key, None)):
                 refusals.append(f"{where}: {key} {_get(entry, key, None)!r} is not an integer")
